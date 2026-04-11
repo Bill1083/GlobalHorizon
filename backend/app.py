@@ -429,6 +429,6 @@ if __name__ == '__main__':
     # Development mode
     app.run(
         host='0.0.0.0',
-        port=int(os.getenv('PORT', 5000)),
+        port=int(os.getenv('PORT', 10000)),
         debug=os.getenv('FLASK_DEBUG', 'False') == 'True'
     )
