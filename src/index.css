@@ -26,6 +26,68 @@ button, input, textarea {
   font: inherit;
 }
 
+/* ===== MOBILE OPTIMIZATIONS FOR CAPACITOR ===== */
+
+/* Disable pull-to-refresh behavior */
+html {
+  overscroll-behavior-y: none;
+  overscroll-behavior: none;
+}
+
+body {
+  overscroll-behavior-y: none;
+  overscroll-behavior: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  /* Prevent zoom on input focus (iOS) */
+  -webkit-text-size-adjust: 100%;
+}
+
+/* iOS safe area support (notch, home indicator) */
+html, body, #root {
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+  padding-top: max(env(safe-area-inset-top, 0px), 0px);
+}
+
+/* Hardware acceleration for smooth performance */
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+[class*="screen"],
+[class*="full"],
+button,
+input,
+textarea {
+  will-change: transform;
+  -webkit-transform: translateZ(0);
+  transform: translateZ(0);
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+}
+
+/* Allow text selection only on specific interactive elements */
+input,
+textarea,
+a {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* Disable long-press context menu on mobile */
+img {
+  -webkit-user-drag: none;
+  pointer-events: none;
+  object-fit: cover;
+  object-position: center;
+}
+
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
 }

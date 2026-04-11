@@ -1,31 +1,80 @@
-import { useState } from 'react';
-import { Heart, Eye, Plus } from 'lucide-react';
-import { FeedItem } from '../data/mockFeed';
+import { useState, useEffect } from 'react';
+import { Eye, Plus } from 'lucide-react';
+import { feedAPI } from '../utils/apiClient';
 
-export function FullscreenFeed({ feed }: { feed: FeedItem[] }) {
+type FeedPost = {
+  id: string;
+  media_url: string;
+  caption?: string;
+  location?: string;
+  creator_email: string;
+  created_at: string;
+  likes?: number;
+};
+
+export function FullscreenFeed({ onUploadClick }: { onUploadClick: () => void }) {
+  const [feed, setFeed] = useState<FeedPost[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [showOverlay, setShowOverlay] = useState(true);
   const [isTransitioning, setIsTransitioning] = useState(false);
-  const [selectedPost, setSelectedPost] = useState<FeedItem | null>(null);
+  const [selectedPost, setSelectedPost] = useState<FeedPost | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Fetch feed on mount
+  useEffect(() => {
+    const loadFeed = async () => {
+      try {
+        setLoading(true);
+        const response = await feedAPI.getPopular();
+        setFeed(response.posts || []);
+        setError(null);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to load feed');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadFeed();
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="flex h-screen w-screen items-center justify-center bg-black">
+        <div className="animate-spin rounded-full border-4 border-slate-600 border-t-cyan-500 h-12 w-12" />
+      </div>
+    );
+  }
+
+  if (error || feed.length === 0) {
+    return (
+      <div className="flex h-screen w-screen flex-col items-center justify-center bg-black text-white">
+        <p className="text-slate-400">{error || 'No posts available'}</p>
+      </div>
+    );
+  }
 
   const currentItem = feed[currentIndex];
 
   const handleSwipe = (direction: 'next' | 'prev') => {
     if (isTransitioning) return;
     setIsTransitioning(true);
-    
+
     if (direction === 'next' && currentIndex < feed.length - 1) {
       setCurrentIndex(currentIndex + 1);
     } else if (direction === 'prev' && currentIndex > 0) {
       setCurrentIndex(currentIndex - 1);
     }
-    
+
     setTimeout(() => setIsTransitioning(false), 300);
   };
 
   const handleScreenTap = () => {
     setShowOverlay(!showOverlay);
   };
+
+  const creatorName = currentItem.creator_email?.split('@')[0] || 'Unknown';
 
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-black">
@@ -35,12 +84,24 @@ export function FullscreenFeed({ feed }: { feed: FeedItem[] }) {
         onClick={handleScreenTap}
       >
         <img
-          src={currentItem.image}
-          alt={currentItem.title}
+          src={currentItem.media_url}
+          alt="Feed post"
           className="h-full w-full object-cover"
         />
         <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/30" />
       </div>
+
+      {/* Creator Name - Bottom Left */}
+      {showOverlay && (
+        <div className="absolute bottom-6 right-20 z-10">
+          <button
+            onClick={() => setSelectedPost(currentItem)}
+            className="text-white text-sm font-medium"
+          >
+            {creatorName}
+          </button>
+        </div>
+      )}
 
       {/* Post Details Modal */}
       {selectedPost && (
@@ -55,32 +116,25 @@ export function FullscreenFeed({ feed }: { feed: FeedItem[] }) {
             <div className="space-y-4">
               <div>
                 <p className="text-xs uppercase tracking-[0.3em] text-cyan-300">Creator</p>
-                <p className="mt-2 text-lg font-semibold text-white">{selectedPost.creator}</p>
+                <p className="mt-2 text-lg font-semibold text-white">{creatorName}</p>
               </div>
-              <div>
-                <p className="text-xs uppercase tracking-[0.3em] text-cyan-300">Title</p>
-                <p className="mt-2 text-lg font-semibold text-white">{selectedPost.title}</p>
-              </div>
-              <div>
-                <p className="text-xs uppercase tracking-[0.3em] text-cyan-300">Location</p>
-                <p className="mt-2 text-sm text-slate-200">{selectedPost.location}</p>
-              </div>
-              <div>
-                <p className="text-xs uppercase tracking-[0.3em] text-cyan-300">Tags</p>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {selectedPost.tags.map((tag) => (
-                    <span
-                      key={tag}
-                      className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs uppercase tracking-[0.15em] text-slate-200"
-                    >
-                      {tag}
-                    </span>
-                  ))}
+              {selectedPost.location && (
+                <div>
+                  <p className="text-xs uppercase tracking-[0.3em] text-cyan-300">Location</p>
+                  <p className="mt-2 text-sm text-slate-200">{selectedPost.location}</p>
                 </div>
-              </div>
+              )}
+              {selectedPost.caption && (
+                <div>
+                  <p className="text-xs uppercase tracking-[0.3em] text-cyan-300">Caption</p>
+                  <p className="mt-2 text-sm text-slate-200">{selectedPost.caption}</p>
+                </div>
+              )}
               <div>
-                <p className="text-xs uppercase tracking-[0.3em] text-cyan-300">Engagement</p>
-                <p className="mt-2 text-sm text-slate-200">{selectedPost.likes.toLocaleString()} likes</p>
+                <p className="text-xs uppercase tracking-[0.3em] text-cyan-300">Posted</p>
+                <p className="mt-2 text-xs text-slate-400">
+                  {new Date(selectedPost.created_at).toLocaleDateString()}
+                </p>
               </div>
             </div>
           </div>
@@ -93,10 +147,7 @@ export function FullscreenFeed({ feed }: { feed: FeedItem[] }) {
           {/* Top - Upload Button */}
           <div className="flex justify-end">
             <button
-              onClick={() => {
-                const uploadBtn = document.querySelector('[data-upload-btn]');
-                if (uploadBtn) (uploadBtn as HTMLButtonElement).click();
-              }}
+              onClick={onUploadClick}
               className="pointer-events-auto flex h-14 w-14 items-center justify-center rounded-full bg-slate-200/20 backdrop-blur-md transition hover:bg-slate-200/30"
               title="Upload"
             >
@@ -104,24 +155,14 @@ export function FullscreenFeed({ feed }: { feed: FeedItem[] }) {
             </button>
           </div>
 
-          {/* Middle - Creator Info */}
-          <div className="pointer-events-auto flex justify-center">
-            <button
-              onClick={() => setSelectedPost(currentItem)}
-              className="rounded-full border border-white/20 bg-slate-950/40 px-5 py-2 backdrop-blur-md transition hover:border-white/40"
-            >
-              <span className="text-sm font-medium text-white">{currentItem.creator}</span>
-            </button>
-          </div>
-
-          {/* Bottom - Navigation & Hide */}
+          {/* Bottom - Hide Button & Navigation */}
           <div className="flex items-center justify-between">
             {/* Previous Button */}
             {currentIndex > 0 && (
               <button
                 onClick={() => handleSwipe('prev')}
                 className="pointer-events-auto flex h-12 w-12 items-center justify-center rounded-full bg-slate-200/20 backdrop-blur-md transition hover:bg-slate-200/30"
-                title="Previous"
+                title="Previous post"
               >
                 <span className="text-lg text-white">‹</span>
               </button>
@@ -143,7 +184,7 @@ export function FullscreenFeed({ feed }: { feed: FeedItem[] }) {
               <button
                 onClick={() => handleSwipe('next')}
                 className="pointer-events-auto flex h-12 w-12 items-center justify-center rounded-full bg-slate-200/20 backdrop-blur-md transition hover:bg-slate-200/30"
-                title="Next"
+                title="Next post"
               >
                 <span className="text-lg text-white">›</span>
               </button>

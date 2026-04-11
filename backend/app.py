@@ -27,12 +27,21 @@ app.config['JWT_SECRET'] = os.getenv('JWT_SECRET', 'dev-secret-key-change-in-pro
 app.config['JWT_ALGORITHM'] = 'HS256'
 app.config['JWT_EXPIRY_HOURS'] = 24
 
-# CORS Configuration
+# CORS Configuration - Allow web and mobile (Capacitor) origins
+allowed_origins = os.getenv('FRONTEND_URL', 'http://localhost:5173').split(',')
+allowed_origins.extend([
+    'capacitor://localhost',
+    'ionic://localhost',
+    'file://',
+])
+
 CORS(app, resources={
     r"/api/*": {
-        "origins": os.getenv('FRONTEND_URL', 'http://localhost:5173').split(','),
-        "methods": ["GET", "POST", "PUT", "DELETE"],
-        "allow_headers": ["Content-Type", "Authorization"]
+        "origins": [origin.strip() for origin in allowed_origins],
+        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization"],
+        "supports_credentials": True,
+        "max_age": 3600
     }
 })
 
@@ -121,11 +130,21 @@ def signup():
     """
     try:
         data = request.get_json()
-        email = data.get('email', '').lower()
+        email = data.get('email', '').lower().strip()
         password = data.get('password', '')
         
         if not email or not password:
             return jsonify({'error': 'Email and password required'}), 400
+        
+        if len(password) < 6:
+            return jsonify({'error': 'Password must be at least 6 characters'}), 400
+        
+        # Check if user already exists
+        try:
+            existing = supabase.table('users').select('*').eq('email', email).single().execute()
+            return jsonify({'error': 'User already registered with this email'}), 409
+        except:
+            pass  # User doesn't exist, proceed with signup
         
         # Attempt to sign up via Supabase Auth
         response = supabase.auth.sign_up({
@@ -212,25 +231,37 @@ def login():
 @token_required
 def get_upload_signature():
     """
-    Generate a signed Cloudinary upload payload.
-    This allows the frontend to upload directly to Cloudinary securely.
+    Generate a signed Cloudinary upload payload for direct browser uploads.
+    Frontend uses this to securely upload directly to Cloudinary.
     """
     try:
+        import hashlib
+        import hmac
+        
         timestamp = int(datetime.utcnow().timestamp())
         
-        # Generate Cloudinary signature for direct upload
-        signature = cloudinary.utils.cloudinary_url(
-            'test',
-            sign_url=True,
-            timestamp=timestamp,
-            resource_type='auto'
-        )[1]
+        # Parameters to sign
+        params = {
+            'timestamp': timestamp,
+            'folder': 'global-horizon/posts',
+            'resource_type': 'auto',
+            'unsigned': False
+        }
+        
+        # Create signature string (key=value pairs, sorted by key)
+        auth_string = '&'.join([f'{k}={v}' for k, v in sorted(params.items())])
+        auth_string += os.getenv('CLOUDINARY_API_SECRET')
+        
+        # Generate SHA-1 signature
+        signature = hashlib.sha1(auth_string.encode()).hexdigest()
         
         return jsonify({
             'cloud_name': os.getenv('CLOUDINARY_CLOUD_NAME'),
             'api_key': os.getenv('CLOUDINARY_API_KEY'),
             'timestamp': timestamp,
             'signature': signature,
+            'public_id': f"global-horizon/{request.user_id}/{datetime.utcnow().timestamp()}",
+            'folder': 'global-horizon/posts',
             'upload_url': f"https://api.cloudinary.com/v1_1/{os.getenv('CLOUDINARY_CLOUD_NAME')}/auto/upload"
         }), 200
     
@@ -351,7 +382,7 @@ def mock_ai_summarize(text: str) -> dict:
 def get_popular_feed():
     """
     Fetch popular posts with Redis caching.
-    Cache TTL: 1 hour (3600 seconds)
+    Cache TTL: 5 minutes (300 seconds) for real-time feel
     """
     try:
         cache_key = 'feed:popular'
@@ -360,27 +391,36 @@ def get_popular_feed():
         cached_feed = redis_client.get(cache_key)
         if cached_feed:
             return jsonify({
-                'message': 'Feed (from cache)',
-                'posts': json.loads(cached_feed)
+                'posts': json.loads(cached_feed),
+                'cached': True
             }), 200
         
-        # Fetch from Supabase if not in cache
-        posts = supabase.table('posts')\
+        # Fetch from Supabase if not in cache (most recent first)
+        result = supabase.table('posts')\
             .select('*, users(email)')\
-            .order('likes', desc=True)\
-            .limit(20)\
+            .order('created_at', desc=True)\
+            .limit(50)\
             .execute()
         
-        # Store in cache for 1 hour
+        # Transform response to include creator email
+        posts_with_creator = []
+        for post in result.data:
+            post_data = post.copy()
+            creator_info = post.get('users', {})
+            if creator_info:
+                post_data['creator_email'] = creator_info.get('email', 'Unknown')
+            posts_with_creator.append(post_data)
+        
+        # Store in cache for 5 minutes
         redis_client.setex(
             cache_key,
-            3600,
-            json.dumps(posts.data, default=str)
+            300,
+            json.dumps(posts_with_creator, default=str)
         )
         
         return jsonify({
-            'message': 'Feed (from database)',
-            'posts': posts.data
+            'posts': posts_with_creator,
+            'cached': False
         }), 200
     
     except Exception as e:
