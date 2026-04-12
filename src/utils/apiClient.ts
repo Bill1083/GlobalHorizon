@@ -1,8 +1,13 @@
 /**
  * API Client - Centralized fetch wrapper with JWT handling
+ * Uses Render URLs via environment variables (VITE_BACKEND_URL)
  */
 
-const API_URL = (import.meta.env.VITE_API_URL as string | undefined) || 'http://localhost:5000/api';
+const API_URL = (import.meta.env.VITE_BACKEND_URL as string | undefined) || 'http://localhost:5000/api';
+
+if (!API_URL.includes('localhost') && !API_URL.startsWith('https://')) {
+  console.warn('API_URL should be HTTPS for production:', API_URL);
+}
 
 const TOKEN_KEY = 'gh_auth_token';
 

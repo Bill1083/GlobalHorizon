@@ -19,6 +19,7 @@ export default function UploadPage() {
   const [stage, setStage] = useState<'select' | 'details'>('select');
   const [caption, setCaption] = useState('');
   const [location, setLocation] = useState('');
+  const [generateAISummary, setGenerateAISummary] = useState(false);
 
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -69,12 +70,13 @@ export default function UploadPage() {
       const cloudinaryData = await cloudinaryResponse.json();
       const mediaUrl = cloudinaryData.secure_url;
 
-      // 4. Create post record in backend
+      // 4. Create post record in backend (with AI summary flag)
       await mediaAPI.createPost({
         media_url: mediaUrl,
         caption: caption || null,
         location: location || null,
         media_type: selectedFile.type.startsWith('video/') ? 'video' : 'image',
+        generate_ai_summary: generateAISummary
       });
 
       // 5. Success - navigate back to feed
@@ -135,6 +137,21 @@ export default function UploadPage() {
                 maxLength={100}
                 disabled={isLoading}
               />
+            </div>
+
+            {/* AI Summary Checkbox */}
+            <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-900/50 p-4">
+              <input
+                type="checkbox"
+                id="ai-summary"
+                checked={generateAISummary}
+                onChange={(e) => setGenerateAISummary(e.target.checked)}
+                disabled={isLoading || !caption}
+                className="cursor-pointer"
+              />
+              <label htmlFor="ai-summary" className={`text-sm cursor-pointer ${!caption ? 'text-slate-500' : 'text-slate-200'}`}>
+                Generate AI summary for caption
+              </label>
             </div>
 
             {/* Error Display */}

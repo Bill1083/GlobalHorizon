@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect   } from 'react';
 import { Eye, Plus } from 'lucide-react';
 import { feedAPI } from '../utils/apiClient';
+import { supabase, RealtimePost } from '../utils/supabaseClient';
 
 type FeedPost = {
   id: string;
@@ -10,6 +11,7 @@ type FeedPost = {
   creator_email: string;
   created_at: string;
   likes?: number;
+  ai_summary?: any;
 };
 
 export function FullscreenFeed({ onUploadClick }: { onUploadClick: () => void }) {
@@ -21,7 +23,7 @@ export function FullscreenFeed({ onUploadClick }: { onUploadClick: () => void })
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Fetch feed on mount
+  // Fetch feed on mount and subscribe to Realtime updates
   useEffect(() => {
     const loadFeed = async () => {
       try {
@@ -37,6 +39,53 @@ export function FullscreenFeed({ onUploadClick }: { onUploadClick: () => void })
     };
 
     loadFeed();
+
+    // Subscribe to Realtime updates on posts table (INSERT events)
+    // RLS policy ensures we only see posts where users can broadcast their own
+    const subscription = supabase
+      .channel('posts:insert')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'posts'
+        },
+        (payload) => {
+          // New post inserted - add to feed immediately
+          const newPost = payload.new as RealtimePost;
+          
+          // Fetch creator email from users table (join)
+          supabase
+            .from('users')
+            .select('email')
+            .eq('id', newPost.user_id)
+            .single()
+            .then(({ data, error: userError }) => {
+              if (!userError && data) {
+                const postWithCreator: FeedPost = {
+                  id: newPost.id,
+                  media_url: newPost.media_url,
+                  caption: newPost.caption,
+                  location: newPost.location,
+                  creator_email: data.email,
+                  created_at: newPost.created_at,
+                  likes: newPost.likes,
+                  ai_summary: newPost.ai_summary
+                };
+                
+                // Add to top of feed (most recent first)
+                setFeed((prevFeed) => [postWithCreator, ...prevFeed]);
+              }
+            });
+        }
+      )
+      .subscribe();
+
+    // Cleanup subscription on unmount
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []);
 
   if (loading) {
