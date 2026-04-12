@@ -270,8 +270,8 @@ def login():
 def get_upload_signature():
     """
     Generate a signed Cloudinary upload payload for direct browser uploads.
-    Frontend uses this to securely upload directly to Cloudinary.
-    Uses SHA-1 signature to ensure secure uploads.
+    CRITICAL: Signature must include ALL parameters sent to Cloudinary (except file, api_key, signature)
+    Reference: https://cloudinary.com/documentation/upload_widget_reference#signed_upload
     """
     try:
         import hashlib
@@ -284,34 +284,39 @@ def get_upload_signature():
         if not all([cloud_name, api_key, api_secret]):
             return jsonify({'error': 'Cloudinary credentials not configured'}), 500
         
-        # Parameters to sign (in alphabetical order for consistency)
-        # These must match what the frontend sends
-        params = {
-            'folder': 'globalhorizon',  # Must match your Cloudinary folder name
-            'resource_type': 'auto',
+        # Build public_id (will be sent to Cloudinary)
+        public_id = f"globalhorizon/{request.user_id}/{int(datetime.utcnow().timestamp() * 1000)}"
+        
+        # IMPORTANT: Parameters to sign MUST match what React sends to Cloudinary
+        # These must be ALL parameters except: file, api_key, cloud_name, signature
+        params_to_sign = {
+            'public_id': public_id,          # ← CRITICAL: Must be included
             'timestamp': timestamp
         }
         
         # Create signature string: key=value&key=value&... then append api_secret
-        # IMPORTANT: Sort by key to ensure consistent hashing
-        param_string = '&'.join([f'{k}={v}' for k, v in sorted(params.items())])
-        auth_string = f"{param_string}{api_secret}"  # Concatenate with api_secret
+        # MUST be in alphabetical order by key
+        param_string = '&'.join([f'{k}={v}' for k, v in sorted(params_to_sign.items())])
+        auth_string = f"{param_string}{api_secret}"
         
         # Generate SHA-1 signature (Cloudinary standard)
         signature = hashlib.sha1(auth_string.encode()).hexdigest()
         
+        print(f"✓ Upload signature generated for user {request.user_id}")
+        print(f"  String to sign: {param_string}{api_secret[:10]}...")
+        print(f"  Public ID: {public_id}")
+        
         return jsonify({
             'cloud_name': cloud_name,
             'api_key': api_key,
+            'public_id': public_id,
             'timestamp': timestamp,
             'signature': signature,
-            'public_id': f"globalhorizon/{request.user_id}/{int(datetime.utcnow().timestamp() * 1000)}",
-            'folder': 'globalhorizon',
             'upload_url': f"https://api.cloudinary.com/v1_1/{cloud_name}/auto/upload"
         }), 200
     
     except Exception as e:
-        print(f"Upload signature error: {str(e)}")
+        print(f"❌ Upload signature error: {str(e)}")
         return jsonify({'error': f'Signature generation failed: {str(e)}'}), 500
 
 
