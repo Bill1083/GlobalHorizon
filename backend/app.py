@@ -30,16 +30,34 @@ app.config['JWT_ALGORITHM'] = 'HS256'
 app.config['JWT_EXPIRY_HOURS'] = 24
 
 # CORS Configuration - Allow web and mobile (Capacitor) origins
-allowed_origins = os.getenv('FRONTEND_URL', 'http://localhost:5173').split(',')
+frontend_url = os.getenv('FRONTEND_URL', '').strip()
+
+# If FRONTEND_URL not set, use development + production Render URLs as fallbacks
+if not frontend_url:
+    allowed_origins = [
+        'http://localhost:5173',      # Development
+        'http://localhost:3000',      # Alternative development
+        'https://globalhorizon-qrq4.onrender.com',  # Production (Render)
+    ]
+else:
+    # Use configured URLs (comma-separated)
+    allowed_origins = [origin.strip() for origin in frontend_url.split(',')]
+
+# Add mobile origins (Capacitor)
 allowed_origins.extend([
     'capacitor://localhost',
     'ionic://localhost',
     'file://',
 ])
 
+# Remove duplicates while preserving order
+allowed_origins = list(dict.fromkeys(allowed_origins))
+
+print(f"✓ CORS enabled for origins: {allowed_origins}")
+
 CORS(app, resources={
     r"/api/*": {
-        "origins": [origin.strip() for origin in allowed_origins],
+        "origins": allowed_origins,
         "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         "allow_headers": ["Content-Type", "Authorization"],
         "supports_credentials": True,
