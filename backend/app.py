@@ -49,6 +49,7 @@ else:
 # - 'http://localhost' as fallback
 allowed_origins.extend([
     'https://localhost',        # Capacitor Android with androidScheme: 'https'
+    'https://localhost/',       # Chrome on Android sends trailing slash variant
     'capacitor://localhost',    # Capacitor default scheme
     'ionic://localhost',        # Ionic apps
     'http://localhost',         # Local dev WebView
