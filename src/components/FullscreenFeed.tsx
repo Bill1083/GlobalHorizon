@@ -40,51 +40,58 @@ export function FullscreenFeed({ onUploadClick }: { onUploadClick: () => void })
 
     loadFeed();
 
-    // Subscribe to Realtime updates on posts table (INSERT events)
+    // Subscribe to Realtime updates on posts table (INSERT events) if Supabase is configured
     // RLS policy ensures we only see posts where users can broadcast their own
-    const subscription = supabase
-      .channel('posts:insert')
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'posts'
-        },
-        (payload) => {
-          // New post inserted - add to feed immediately
-          const newPost = payload.new as RealtimePost;
-          
-          // Fetch creator email from users table (join)
-          supabase
-            .from('users')
-            .select('email')
-            .eq('id', newPost.user_id)
-            .single()
-            .then(({ data, error: userError }) => {
-              if (!userError && data) {
-                const postWithCreator: FeedPost = {
-                  id: newPost.id,
-                  media_url: newPost.media_url,
-                  caption: newPost.caption,
-                  location: newPost.location,
-                  creator_email: data.email,
-                  created_at: newPost.created_at,
-                  likes: newPost.likes,
-                  ai_summary: newPost.ai_summary
-                };
-                
-                // Add to top of feed (most recent first)
-                setFeed((prevFeed) => [postWithCreator, ...prevFeed]);
-              }
-            });
-        }
-      )
-      .subscribe();
+    let subscription: any = null;
+    
+    if (supabase) {
+      const supabaseClient = supabase;  // Capture reference to avoid null issues
+      subscription = supabaseClient
+        .channel('posts:insert')
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'posts'
+          },
+          (payload: any) => {
+            // New post inserted - add to feed immediately
+            const newPost = payload.new as RealtimePost;
+            
+            // Fetch creator email from users table (join)
+            supabaseClient
+              .from('users')
+              .select('email')
+              .eq('id', newPost.user_id)
+              .single()
+              .then(({ data, error: userError }: any) => {
+                if (!userError && data) {
+                  const postWithCreator: FeedPost = {
+                    id: newPost.id,
+                    media_url: newPost.media_url,
+                    caption: newPost.caption,
+                    location: newPost.location,
+                    creator_email: data.email,
+                    created_at: newPost.created_at,
+                    likes: newPost.likes,
+                    ai_summary: newPost.ai_summary
+                  };
+                  
+                  // Add to top of feed (most recent first)
+                  setFeed((prevFeed) => [postWithCreator, ...prevFeed]);
+                }
+              });
+          }
+        )
+        .subscribe();
+    }
 
     // Cleanup subscription on unmount
     return () => {
-      subscription.unsubscribe();
+      if (subscription) {
+        subscription.unsubscribe();
+      }
     };
   }, []);
 

@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Global Horizon</string>
+    <string name="title_activity_main">Global Horizon</string>
+    <string name="package_name">com.globalhorizon.app</string>
+    <string name="custom_url_scheme">com.globalhorizon.app</string>
+</resources>

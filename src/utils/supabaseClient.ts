@@ -10,15 +10,19 @@ import { getToken } from './apiClient';
 const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL as string | undefined);
 const SUPABASE_ANON_KEY = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined);
 
-if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-  throw new Error('Missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY environment variables');
-}
-
 /**
  * Create Supabase client with custom JWT authentication
  * RLS policies will use the JWT payload (user_id, email) from our custom JWT
+ * Deferred initialization to avoid app crash if env vars are missing
  */
-export const createSupabaseClient = (): SupabaseClient => {
+export const createSupabaseClient = (): SupabaseClient | null => {
+  // Gracefully handle missing env vars - allow app to load even without Realtime
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+    console.warn('⚠️ Supabase environment variables not configured. Real-time feed updates disabled.');
+    console.warn('Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to enable live updates.');
+    return null;
+  }
+
   const token = getToken();
   
   return createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
@@ -36,9 +40,22 @@ export const createSupabaseClient = (): SupabaseClient => {
 };
 
 /**
- * Get Supabase client instance
+ * Lazy-initialized Supabase client instance
+ * Only created when first accessed
  */
-export const supabase = createSupabaseClient();
+let supabaseInstance: SupabaseClient | null | undefined;
+
+export const getSupabase = (): SupabaseClient | null => {
+  if (supabaseInstance === undefined) {
+    supabaseInstance = createSupabaseClient();
+  }
+  return supabaseInstance;
+};
+
+/**
+ * Compatibility export - provides supabase instance or null
+ */
+export const supabase = getSupabase();
 
 /**
  * Subscribe to real-time post updates

@@ -1,12 +1,25 @@
 /**
  * API Client - Centralized fetch wrapper with JWT handling
  * Uses Render URLs via environment variables (VITE_BACKEND_URL)
+ * Gracefully degrades if env vars aren't set
  */
 
 const API_URL = (import.meta.env.VITE_BACKEND_URL as string | undefined) || 'http://localhost:5000/api';
 
-if (!API_URL.includes('localhost') && !API_URL.startsWith('https://')) {
-  console.warn('API_URL should be HTTPS for production:', API_URL);
+// Log environment status at startup
+if (typeof window !== 'undefined') {
+  const isDev = !import.meta.env.PROD;
+  const backendUrl = import.meta.env.VITE_BACKEND_URL;
+  
+  if (!backendUrl) {
+    console.warn('⚠️ VITE_BACKEND_URL not configured. Falling back to localhost.');
+    if (!isDev) {
+      console.warn('⚠️ On production, API requests will fail without proper environment variables!');
+      console.warn('📋 Set VITE_BACKEND_URL in Render dashboard to: https://globalhorizon-api-backend.onrender.com/api');
+    }
+  } else if (!API_URL.includes('localhost') && !API_URL.startsWith('https://')) {
+    console.warn('⚠️ API_URL should be HTTPS for production:', API_URL);
+  }
 }
 
 const TOKEN_KEY = 'gh_auth_token';
@@ -15,21 +28,33 @@ const TOKEN_KEY = 'gh_auth_token';
  * Get stored JWT token from localStorage
  */
 export const getToken = (): string | null => {
-  return localStorage.getItem(TOKEN_KEY);
+  try {
+    return localStorage.getItem(TOKEN_KEY);
+  } catch {
+    return null;
+  }
 };
 
 /**
  * Store JWT token in localStorage
  */
 export const setToken = (token: string): void => {
-  localStorage.setItem(TOKEN_KEY, token);
+  try {
+    localStorage.setItem(TOKEN_KEY, token);
+  } catch (err) {
+    console.error('Failed to store token:', err);
+  }
 };
 
 /**
  * Clear stored JWT token
  */
 export const clearToken = (): void => {
-  localStorage.removeItem(TOKEN_KEY);
+  try {
+    localStorage.removeItem(TOKEN_KEY);
+  } catch (err) {
+    console.error('Failed to clear token:', err);
+  }
 };
 
 /**
@@ -63,7 +88,7 @@ export const apiCall = async (
   if (requiresAuth) {
     const token = getToken();
     if (!token) {
-      throw new Error('No authentication token found');
+      throw new Error('No authentication token found. Please log in.');
     }
     finalHeaders['Authorization'] = `Bearer ${token}`;
   }
@@ -82,13 +107,21 @@ export const apiCall = async (
     const response = await fetch(url, fetchOptions);
 
     if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || `HTTP ${response.status}`);
+      let errorData: any = {};
+      try {
+        errorData = await response.json();
+      } catch {
+        // Response isn't JSON, use status text
+      }
+      
+      const errorMessage = errorData.error || errorData.message || `HTTP ${response.status}`;
+      throw new Error(errorMessage);
     }
 
     return await response.json();
   } catch (error) {
-    console.error(`API Error [${method} ${endpoint}]:`, error);
+    const errorMsg = error instanceof Error ? error.message : 'API request failed';
+    console.error(`API Error [${method} ${endpoint}]:`, errorMsg);
     throw error;
   }
 };
