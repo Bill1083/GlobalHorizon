@@ -1,16 +1,18 @@
 """
-Global Horizon - Flask Backend
-Main application entry point with authentication, Cloudinary, AI, and Redis caching.
+Global Horizon - Flask Backend (Production)
+Features: Custom JWT auth with bcrypt, Cloudinary direct uploads, Redis caching, AI mocking
 """
 
 import os
 import json
+import hashlib
 from functools import wraps
 from datetime import datetime, timedelta
 
 import jwt
 import redis
 import requests
+import bcrypt
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
@@ -63,6 +65,31 @@ cloudinary.config(
 )
 
 # ============================================================================
+# HELPER FUNCTIONS
+# ============================================================================
+
+def hash_password(password: str) -> str:
+    """Hash password using bcrypt."""
+    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
+
+def verify_password(password: str, hashed: str) -> bool:
+    """Verify password against bcrypt hash."""
+    return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
+
+
+def generate_jwt(user_id: str, email: str, is_admin: bool = False) -> str:
+    """Generate JWT token for a user."""
+    payload = {
+        'user_id': user_id,
+        'email': email,
+        'is_admin': is_admin,
+        'iat': datetime.utcnow(),
+        'exp': datetime.utcnow() + timedelta(hours=app.config['JWT_EXPIRY_HOURS'])
+    }
+    return jwt.encode(payload, app.config['JWT_SECRET'], algorithm=app.config['JWT_ALGORITHM'])
+
+# ============================================================================
 # MIDDLEWARE & DECORATORS
 # ============================================================================
 
@@ -106,18 +133,6 @@ def token_required(f):
     return decorated
 
 
-def generate_jwt(user_id: str, email: str, is_admin: bool = False) -> str:
-    """Generate a JWT token for a user."""
-    payload = {
-        'user_id': user_id,
-        'email': email,
-        'is_admin': is_admin,
-        'iat': datetime.utcnow(),
-        'exp': datetime.utcnow() + timedelta(hours=app.config['JWT_EXPIRY_HOURS'])
-    }
-    return jwt.encode(payload, app.config['JWT_SECRET'], algorithm=app.config['JWT_ALGORITHM'])
-
-
 # ============================================================================
 # AUTHENTICATION ROUTES
 # ============================================================================
@@ -125,8 +140,9 @@ def generate_jwt(user_id: str, email: str, is_admin: bool = False) -> str:
 @app.route('/api/auth/signup', methods=['POST'])
 def signup():
     """
-    Signup endpoint. Creates a new user in Supabase and returns JWT.
-    Expected JSON: { "email": "user@example.com", "password": "password123" }
+    Create new user account with bcrypt password hashing.
+    Request: { "email": "user@example.com", "password": "password123" }
+    Response: { "token": "jwt...", "user": {...} }
     """
     try:
         data = request.get_json()
@@ -141,86 +157,82 @@ def signup():
         
         # Check if user already exists
         try:
-            existing = supabase.table('users').select('*').eq('email', email).single().execute()
-            return jsonify({'error': 'User already registered with this email'}), 409
+            existing = supabase.table('users').select('id').eq('email', email).single().execute()
+            return jsonify({'error': 'User already registered'}), 409
         except:
-            pass  # User doesn't exist, proceed with signup
+            pass  # User doesn't exist, proceed
         
-        # Attempt to sign up via Supabase Auth
-        response = supabase.auth.sign_up({
-            'email': email,
-            'password': password
-        })
+        # Hash password
+        hashed_password = hash_password(password)
         
-        user_id = response.user.id
+        # Create user record (custom user table, not Supabase Auth)
         is_admin = email == 'admin@test.com'
-        
-        # Store user profile in public.users table
-        supabase.table('users').insert({
-            'id': user_id,
+        response = supabase.table('users').insert({
             'email': email,
+            'password_hash': hashed_password,
             'is_admin': is_admin,
             'created_at': datetime.utcnow().isoformat()
         }).execute()
         
-        # Generate JWT token
+        user_id = response.data[0]['id']
+        
+        # Generate JWT
         token = generate_jwt(user_id, email, is_admin)
         
         return jsonify({
             'message': 'User created successfully',
             'token': token,
-            'user': {
-                'id': user_id,
-                'email': email,
-                'is_admin': is_admin
-            }
+            'user': {'id': user_id, 'email': email, 'is_admin': is_admin}
         }), 201
     
     except Exception as e:
+        print(f"Signup error: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/auth/login', methods=['POST'])
 def login():
     """
-    Login endpoint. Authenticates user and returns JWT.
-    Expected JSON: { "email": "user@example.com", "password": "password123" }
+    Authenticate user with email/password, return JWT.
+    Request: { "email": "user@example.com", "password": "password123" }
+    Response: { "token": "jwt...", "user": {...} }
     """
     try:
         data = request.get_json()
-        email = data.get('email', '').lower()
+        email = data.get('email', '').lower().strip()
         password = data.get('password', '')
         
         if not email or not password:
             return jsonify({'error': 'Email and password required'}), 400
         
-        # Authenticate via Supabase Auth
-        response = supabase.auth.sign_in_with_password({
-            'email': email,
-            'password': password
-        })
+        # Fetch user from database
+        response = supabase.table('users').select('*').eq('email', email).single().execute()
         
-        user_id = response.user.id
+        if not response.data:
+            return jsonify({'error': 'Invalid credentials'}), 401
         
-        # Fetch user profile to check admin status
-        user_data = supabase.table('users').select('*').eq('id', user_id).single().execute()
-        is_admin = user_data.data.get('is_admin', False)
+        user = response.data
         
-        # Generate JWT token
-        token = generate_jwt(user_id, email, is_admin)
+        # Verify password with bcrypt
+        if not verify_password(password, user['password_hash']):
+            return jsonify({'error': 'Invalid credentials'}), 401
+        
+        # Generate JWT
+        token = generate_jwt(user['id'], user['email'], user.get('is_admin', False))
         
         return jsonify({
             'message': 'Login successful',
             'token': token,
             'user': {
-                'id': user_id,
-                'email': email,
-                'is_admin': is_admin
+                'id': user['id'],
+                'email': user['email'],
+                'is_admin': user.get('is_admin', False)
             }
         }), 200
     
     except Exception as e:
-        return jsonify({'error': 'Invalid credentials or user not found'}), 401
+        print(f"Login error: {str(e)}")
+        return jsonify({'error': 'Invalid credentials or server error'}), 401
 
 
 # ============================================================================
@@ -273,13 +285,14 @@ def get_upload_signature():
 @token_required
 def create_post():
     """
-    Create a new post after media has been uploaded to Cloudinary.
-    Expected JSON:
+    Create post record after media uploaded to Cloudinary.
+    Request:
     {
         "media_url": "https://cloudinary.com/...",
-        "caption": "Beautiful sunset...",
-        "location": "Bali, Indonesia",
-        "media_type": "image" or "video"
+        "caption": "Beautiful sunset",
+        "location": "Bali",
+        "media_type": "image",
+        "generate_ai_summary": true/false
     }
     """
     try:
@@ -288,30 +301,38 @@ def create_post():
         caption = data.get('caption', '')
         location = data.get('location', '')
         media_type = data.get('media_type', 'image')
+        generate_ai_summary = data.get('generate_ai_summary', False)
         
         if not media_url:
             return jsonify({'error': 'Media URL required'}), 400
         
-        # Store post metadata in Supabase
+        # Optional: Generate AI summary if requested
+        ai_summary = None
+        if generate_ai_summary and caption:
+            ai_summary = mock_ai_summarize(caption)
+        
+        # Create post in Supabase
         post = supabase.table('posts').insert({
             'user_id': request.user_id,
             'media_url': media_url,
             'caption': caption,
             'location': location,
             'media_type': media_type,
+            'ai_summary': ai_summary,
             'likes': 0,
             'created_at': datetime.utcnow().isoformat()
         }).execute()
         
-        # Invalidate feed cache
+        # Invalidate Redis cache to show new post immediately
         redis_client.delete('feed:popular')
         
         return jsonify({
             'message': 'Post created successfully',
-            'post': post.data[0]
+            'post': post.data[0] if post.data else {}
         }), 201
     
     except Exception as e:
+        print(f"Create post error: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 
