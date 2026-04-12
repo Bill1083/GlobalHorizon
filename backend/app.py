@@ -43,11 +43,16 @@ else:
     # Use configured URLs (comma-separated)
     allowed_origins = [origin.strip() for origin in frontend_url.split(',')]
 
-# Add mobile origins (Capacitor)
+# Add mobile origins - both schemes needed:
+# - 'https://localhost' when capacitor.config.ts sets androidScheme: 'https'
+# - 'capacitor://localhost' for older Capacitor or when androidScheme is not set
+# - 'http://localhost' as fallback
 allowed_origins.extend([
-    'capacitor://localhost',
-    'ionic://localhost',
-    'file://',
+    'https://localhost',        # Capacitor Android with androidScheme: 'https'
+    'capacitor://localhost',    # Capacitor default scheme
+    'ionic://localhost',        # Ionic apps
+    'http://localhost',         # Local dev WebView
+    'file://',                  # Local file access
 ])
 
 # Remove duplicates while preserving order

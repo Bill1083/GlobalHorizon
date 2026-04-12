@@ -9,7 +9,14 @@ export default function SearchPage() {
         </p>
         <div className="mt-8 rounded-[1.75rem] border border-white/10 bg-slate-900 p-8 text-slate-300">
           <p className="mb-3 text-sm uppercase tracking-[0.2em] text-slate-400">Map preview</p>
-          <div className="aspect-[16/9] overflow-hidden rounded-[1.5rem] bg-gradient-to-br from-cyan-600/10 via-transparent to-slate-950/10" />
+          <div className="aspect-[16/9] overflow-hidden rounded-[1.5rem] bg-gradient-to-br from-cyan-600/10 via-transparent to-slate-950/10">
+            This part of the app is still being constructed. 
+            In the final version, you'll be able to search 
+            for travel stories, filter by location, and 
+            explore a dynamic map of cinematic landscapes 
+            shared by our community. Stay tuned for the 
+            grand unveiling of this feature!
+          </div>
         </div>
       </div>
     </div>
