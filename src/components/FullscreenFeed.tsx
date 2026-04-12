@@ -105,8 +105,44 @@ export function FullscreenFeed({ onUploadClick }: { onUploadClick: () => void })
 
   if (error || feed.length === 0) {
     return (
-      <div className="flex h-screen w-screen flex-col items-center justify-center bg-black text-white">
-        <p className="text-slate-400">{error || 'No posts available'}</p>
+      <div className="flex h-screen w-screen flex-col items-center justify-center bg-black text-white px-6">
+        <div className="text-center max-w-sm">
+          <p className="text-2xl font-semibold mb-2">No posts yet</p>
+          <p className="text-slate-400 mb-8">
+            {error ? 'Failed to load feed' : 'Be the first to share your travel moments!'}
+          </p>
+          
+          {/* Navigation buttons */}
+          <div className="space-y-3">
+            <button
+              onClick={onUploadClick}
+              className="w-full rounded-3xl bg-cyan-500 px-6 py-3 text-sm font-semibold text-slate-950 transition hover:bg-cyan-400"
+            >
+              + Upload a Story
+            </button>
+            
+            <a
+              href="/app/profile"
+              className="block w-full rounded-3xl border border-white/10 bg-white/5 px-6 py-3 text-sm font-medium text-slate-300 transition hover:bg-white/10"
+            >
+              View Profile
+            </a>
+            
+            <a
+              href="/app/search"
+              className="block w-full rounded-3xl border border-white/10 bg-white/5 px-6 py-3 text-sm font-medium text-slate-300 transition hover:bg-white/10"
+            >
+              Explore Locations
+            </a>
+
+            <button
+              onClick={() => window.location.reload()}
+              className="w-full rounded-3xl border border-white/10 bg-white/5 px-6 py-3 text-sm font-medium text-slate-300 transition hover:bg-white/10"
+            >
+              Refresh Feed
+            </button>
+          </div>
+        </div>
       </div>
     );
   }
