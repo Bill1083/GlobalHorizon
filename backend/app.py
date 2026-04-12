@@ -65,11 +65,19 @@ CORS(app, resources={
     }
 })
 
-# Initialize Supabase
-supabase: Client = create_client(
-    os.getenv('SUPABASE_URL'),
-    os.getenv('SUPABASE_KEY')
-)
+# Initialize Supabase with service_role key (bypasses RLS for backend operations)
+# IMPORTANT: Use SUPABASE_SERVICE_KEY (not SUPABASE_KEY which is anon)
+# The service_role key has unrestricted database access, RLS policies don't apply
+# This allows backend to insert/update/delete without worrying about RLS policies
+supabase_url = os.getenv('SUPABASE_URL')
+supabase_service_key = os.getenv('SUPABASE_SERVICE_KEY')
+
+if not supabase_url or not supabase_service_key:
+    raise ValueError('Missing SUPABASE_URL or SUPABASE_SERVICE_KEY environment variables. Use SERVICE_ROLE key, not anon key.')
+
+supabase: Client = create_client(supabase_url, supabase_service_key)
+print(f"✓ Supabase initialized with service_role key (RLS bypassed for backend operations)")
+
 
 # Initialize Redis
 redis_url = os.getenv('REDIS_URL', 'redis://localhost:6379')

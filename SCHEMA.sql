@@ -18,6 +18,11 @@ CREATE TABLE public.users (
 -- Enable RLS on users table
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
 
+-- Allow anyone to insert during signup (no auth required yet)
+CREATE POLICY "Allow signup - insert new user"
+ON public.users FOR INSERT
+WITH CHECK (true);
+
 -- Users can only read their own data
 -- Our custom JWT has 'user_id' claim that matches the id column
 CREATE POLICY "Users can read own data"

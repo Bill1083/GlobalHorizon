@@ -8,6 +8,7 @@
 VITE_BACKEND_URL=http://localhost:5000/api
 
 # Supabase (for Realtime WebSocket subscriptions)
+# Use ANON KEY (public, reads RLS policies)
 VITE_SUPABASE_URL=https://your-project.supabase.co
 VITE_SUPABASE_ANON_KEY=your-supabase-anon-key-here
 ```
@@ -22,9 +23,9 @@ VITE_SUPABASE_ANON_KEY=your-supabase-anon-key-here
 ```
 
 **Notes:**
-- `VITE_BACKEND_URL` points to Render backend service
-- `VITE_SUPABASE_*` enables real-time WebSocket subscriptions
-- Anon key is public (safe to expose)
+- `VITE_SUPABASE_ANON_KEY` is the public key (safe to expose) - respects RLS policies
+- Frontend uses anon key so RLS policies enforce data access control
+- Anon key is NOT the service_role key
 
 ---
 
@@ -45,8 +46,10 @@ JWT_EXPIRY_HOURS=24
 FRONTEND_URL=http://localhost:5173
 
 # Supabase Database
+# ⚠️ IMPORTANT: Use SERVICE_ROLE key (not anon key)
+# Service role key bypasses RLS - backend needs unrestricted database access
 SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_KEY=your-supabase-service-role-key-here
+SUPABASE_SERVICE_KEY=your-supabase-service-role-key-here
 
 # Redis Caching (Render managed)
 REDIS_URL=redis://red-d7cuu5n41pts739n3qn0:6379
@@ -74,7 +77,7 @@ JWT_SECRET=your-random-secret-key-generate-new-for-production
 FRONTEND_URL=https://globalhorizon-qrq4.onrender.com
 
 SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_KEY=your-supabase-service-role-key
+SUPABASE_SERVICE_KEY=your-supabase-service-role-key
 
 REDIS_URL=redis://red-d7cuu5n41pts739n3qn0:6379
 
@@ -88,10 +91,24 @@ AI_API_KEY=your-api-key
 
 **Important:**
 - `JWT_SECRET` must be strong and different for production
-- `SUPABASE_KEY` is service role key (keep private)
+- `SUPABASE_SERVICE_KEY` is the service_role key (NOT anon key) - keep private!
+- Backend uses service_role to bypass RLS (backend can write to any table)
 - Redis URL provided by Render add-on
 - Cloudinary keys obtained from Cloudinary dashboard
 - Frontend CORS is validated against `FRONTEND_URL`
+
+---
+
+## Key Differences: Anon vs Service Role
+
+| Key | Name | Frontend | Backend | Respects RLS |
+|-----|------|----------|---------|-------------|
+| Anon Key | `VITE_SUPABASE_ANON_KEY` | ✅ Use this | ❌ Don't use | ✅ Yes |
+| Service Role Key | `SUPABASE_SERVICE_KEY` | ❌ Don't use | ✅ Use this | ❌ No |
+
+**Why:**
+- Frontend uses anon key so users can only access their own data (RLS enforced)
+- Backend uses service_role so it can perform admin operations without RLS restrictions
 
 ---
 
@@ -102,8 +119,12 @@ AI_API_KEY=your-api-key
 2. Create/link your project
 3. Get from: **Settings → API**
    - `SUPABASE_URL` - project URL
-   - `SUPABASE_KEY` - service role key (keep private!)
-   - `VITE_SUPABASE_ANON_KEY` - anon key (public)
+   - `VITE_SUPABASE_ANON_KEY` - **anon/public key** (for frontend, respects RLS)
+   - `SUPABASE_SERVICE_KEY` - **service role key** (for backend, bypasses RLS - keep private!)
+
+**Important:** 
+- Frontend uses anon key (public, enforces RLS)
+- Backend uses service role key (private, unrestricted access)
 
 ### 2. Cloudinary
 1. Go to [cloudinary.com](https://cloudinary.com)
@@ -151,7 +172,7 @@ $rng.GetBytes($randomBytes)
 - [ ] `JWT_SECRET` = strong random 64-char string (NEW value, not same as dev)
 - [ ] `FRONTEND_URL` = https://globalhorizon-qrq4.onrender.com (for CORS)
 - [ ] `SUPABASE_URL` = your project URL
-- [ ] `SUPABASE_KEY` = service role key
+- [ ] `SUPABASE_SERVICE_KEY` = service role key (NOT anon key)
 - [ ] `REDIS_URL` = from Render add-on (e.g., redis://red-xxx:6379)
 - [ ] `CLOUDINARY_CLOUD_NAME` = cloudinary cloud name
 - [ ] `CLOUDINARY_API_KEY` = cloudinary API key

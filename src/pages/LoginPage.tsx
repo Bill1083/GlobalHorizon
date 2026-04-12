@@ -15,6 +15,7 @@ export default function LoginPage() {
     try {
       await login(email, password);
     } catch (err) {
+        console.log(err);
       setLocalError(err instanceof Error ? err.message : 'Login failed. Please try again.');
     }
   };
