@@ -271,40 +271,48 @@ def get_upload_signature():
     """
     Generate a signed Cloudinary upload payload for direct browser uploads.
     Frontend uses this to securely upload directly to Cloudinary.
+    Uses SHA-1 signature to ensure secure uploads.
     """
     try:
         import hashlib
-        import hmac
         
         timestamp = int(datetime.utcnow().timestamp())
+        cloud_name = os.getenv('CLOUDINARY_CLOUD_NAME')
+        api_key = os.getenv('CLOUDINARY_API_KEY')
+        api_secret = os.getenv('CLOUDINARY_API_SECRET')
         
-        # Parameters to sign
+        if not all([cloud_name, api_key, api_secret]):
+            return jsonify({'error': 'Cloudinary credentials not configured'}), 500
+        
+        # Parameters to sign (in alphabetical order for consistency)
+        # These must match what the frontend sends
         params = {
-            'timestamp': timestamp,
-            'folder': 'global-horizon/posts',
+            'folder': 'globalhorizon',  # Must match your Cloudinary folder name
             'resource_type': 'auto',
-            'unsigned': False
+            'timestamp': timestamp
         }
         
-        # Create signature string (key=value pairs, sorted by key)
-        auth_string = '&'.join([f'{k}={v}' for k, v in sorted(params.items())])
-        auth_string += os.getenv('CLOUDINARY_API_SECRET')
+        # Create signature string: key=value&key=value&... then append api_secret
+        # IMPORTANT: Sort by key to ensure consistent hashing
+        param_string = '&'.join([f'{k}={v}' for k, v in sorted(params.items())])
+        auth_string = f"{param_string}{api_secret}"  # Concatenate with api_secret
         
-        # Generate SHA-1 signature
+        # Generate SHA-1 signature (Cloudinary standard)
         signature = hashlib.sha1(auth_string.encode()).hexdigest()
         
         return jsonify({
-            'cloud_name': os.getenv('CLOUDINARY_CLOUD_NAME'),
-            'api_key': os.getenv('CLOUDINARY_API_KEY'),
+            'cloud_name': cloud_name,
+            'api_key': api_key,
             'timestamp': timestamp,
             'signature': signature,
-            'public_id': f"global-horizon/{request.user_id}/{datetime.utcnow().timestamp()}",
-            'folder': 'global-horizon/posts',
-            'upload_url': f"https://api.cloudinary.com/v1_1/{os.getenv('CLOUDINARY_CLOUD_NAME')}/auto/upload"
+            'public_id': f"globalhorizon/{request.user_id}/{int(datetime.utcnow().timestamp() * 1000)}",
+            'folder': 'globalhorizon',
+            'upload_url': f"https://api.cloudinary.com/v1_1/{cloud_name}/auto/upload"
         }), 200
     
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        print(f"Upload signature error: {str(e)}")
+        return jsonify({'error': f'Signature generation failed: {str(e)}'}), 500
 
 
 @app.route('/api/media/post', methods=['POST'])
