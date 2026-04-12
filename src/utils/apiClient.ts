@@ -125,6 +125,7 @@ export const mediaAPI = {
     caption: string | null;
     location: string | null;
     media_type: string;
+    generate_ai_summary: boolean;
   }) =>
     apiCall('/media/post', {
       method: 'POST',
