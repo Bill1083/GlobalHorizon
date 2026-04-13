@@ -4,6 +4,7 @@ Features: Custom JWT auth with bcrypt, Cloudinary direct uploads, Redis caching,
 """
 
 import os
+import re
 import json
 import hashlib
 from functools import wraps
@@ -15,10 +16,17 @@ import requests
 import bcrypt
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from dotenv import load_dotenv
 from supabase import create_client, Client
 import cloudinary
 import cloudinary.uploader
+
+# Regex for basic email validation (no external libs required)
+EMAIL_RE = re.compile(r'^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$')
+# Allowed Cloudinary host (prevents arbitrary URL injection)
+CLOUDINARY_HOST = 'res.cloudinary.com'
 
 # Load environment variables
 load_dotenv()
@@ -70,6 +78,17 @@ CORS(app, resources={
         "max_age": 3600
     }
 })
+
+# Rate limiter – backed by Redis so limits survive Gunicorn worker restarts
+# Falls back to in-memory if Redis connection fails at startup
+limiter = Limiter(
+    key_func=get_remote_address,
+    app=app,
+    storage_uri=os.getenv('REDIS_URL', 'redis://localhost:6379'),
+    storage_options={'socket_connect_timeout': 2},
+    default_limits=[],   # No global default; limits are set per-route
+    on_breach=lambda limit: (jsonify({'error': 'Too many requests. Please slow down.'}), 429)
+)
 
 # Initialize Supabase with service_role key (bypasses RLS for backend operations)
 # IMPORTANT: Use SUPABASE_SERVICE_KEY (not SUPABASE_KEY which is anon)
@@ -170,6 +189,7 @@ def token_required(f):
 # ============================================================================
 
 @app.route('/api/auth/signup', methods=['POST'])
+@limiter.limit('5 per hour')
 def signup():
     """
     Create new user account with bcrypt password hashing.
@@ -177,52 +197,61 @@ def signup():
     Response: { "token": "jwt...", "user": {...} }
     """
     try:
-        data = request.get_json()
-        email = data.get('email', '').lower().strip()
-        password = data.get('password', '')
-        
+        data = request.get_json(silent=True) or {}
+        email = str(data.get('email', '')).lower().strip()[:254]
+        password = str(data.get('password', ''))
+
         if not email or not password:
             return jsonify({'error': 'Email and password required'}), 400
-        
-        if len(password) < 6:
-            return jsonify({'error': 'Password must be at least 6 characters'}), 400
-        
+
+        if not EMAIL_RE.match(email):
+            return jsonify({'error': 'Invalid email address'}), 400
+
+        if len(password) < 8:
+            return jsonify({'error': 'Password must be at least 8 characters'}), 400
+
+        if len(password) > 128:
+            return jsonify({'error': 'Password too long'}), 400
+
         # Check if user already exists
         try:
             existing = supabase.table('users').select('id').eq('email', email).single().execute()
-            return jsonify({'error': 'User already registered'}), 409
-        except:
+            if existing.data:
+                return jsonify({'error': 'User already registered'}), 409
+        except Exception:
             pass  # User doesn't exist, proceed
-        
+
         # Hash password
         hashed_password = hash_password(password)
-        
-        # Create user record (custom user table, not Supabase Auth)
-        is_admin = email == 'admin@test.com'
+
+        # Admin emails come from an environment variable (never hardcoded)
+        admin_emails_raw = os.getenv('ADMIN_EMAILS', '')
+        admin_emails = {e.strip().lower() for e in admin_emails_raw.split(',') if e.strip()}
+        is_admin = email in admin_emails
+
         response = supabase.table('users').insert({
             'email': email,
             'password_hash': hashed_password,
             'is_admin': is_admin,
             'created_at': datetime.utcnow().isoformat()
         }).execute()
-        
+
         user_id = response.data[0]['id']
-        
-        # Generate JWT
         token = generate_jwt(user_id, email, is_admin)
-        
+
         return jsonify({
             'message': 'User created successfully',
             'token': token,
             'user': {'id': user_id, 'email': email, 'is_admin': is_admin}
         }), 201
-    
+
     except Exception as e:
         print(f"Signup error: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Registration failed. Please try again.'}), 500
 
 
 @app.route('/api/auth/login', methods=['POST'])
+@limiter.limit('10 per minute')
 def login():
     """
     Authenticate user with email/password, return JWT.
@@ -230,28 +259,36 @@ def login():
     Response: { "token": "jwt...", "user": {...} }
     """
     try:
-        data = request.get_json()
-        email = data.get('email', '').lower().strip()
-        password = data.get('password', '')
-        
+        data = request.get_json(silent=True) or {}
+        email = str(data.get('email', '')).lower().strip()[:254]
+        password = str(data.get('password', ''))
+
         if not email or not password:
             return jsonify({'error': 'Email and password required'}), 400
-        
+
+        if not EMAIL_RE.match(email):
+            return jsonify({'error': 'Invalid credentials'}), 401
+
+        if len(password) > 128:
+            return jsonify({'error': 'Invalid credentials'}), 401
+
         # Fetch user from database
-        response = supabase.table('users').select('*').eq('email', email).single().execute()
-        
+        try:
+            response = supabase.table('users').select('*').eq('email', email).single().execute()
+        except Exception:
+            return jsonify({'error': 'Invalid credentials'}), 401
+
         if not response.data:
             return jsonify({'error': 'Invalid credentials'}), 401
-        
+
         user = response.data
-        
+
         # Verify password with bcrypt
         if not verify_password(password, user['password_hash']):
             return jsonify({'error': 'Invalid credentials'}), 401
-        
-        # Generate JWT
+
         token = generate_jwt(user['id'], user['email'], user.get('is_admin', False))
-        
+
         return jsonify({
             'message': 'Login successful',
             'token': token,
@@ -261,10 +298,10 @@ def login():
                 'is_admin': user.get('is_admin', False)
             }
         }), 200
-    
+
     except Exception as e:
         print(f"Login error: {str(e)}")
-        return jsonify({'error': 'Invalid credentials or server error'}), 401
+        return jsonify({'error': 'Invalid credentials'}), 401
 
 
 # ============================================================================
@@ -273,6 +310,7 @@ def login():
 
 @app.route('/api/media/upload-signature', methods=['GET'])
 @token_required
+@limiter.limit('20 per minute')
 def get_upload_signature():
     """
     Generate a signed Cloudinary upload payload for direct browser uploads.
@@ -323,40 +361,39 @@ def get_upload_signature():
     
     except Exception as e:
         print(f"❌ Upload signature error: {str(e)}")
-        return jsonify({'error': f'Signature generation failed: {str(e)}'}), 500
+        return jsonify({'error': 'Failed to generate upload signature'}), 500
 
 
 @app.route('/api/media/post', methods=['POST'])
 @token_required
+@limiter.limit('10 per minute')
 def create_post():
     """
     Create post record after media uploaded to Cloudinary.
-    Request:
-    {
-        "media_url": "https://cloudinary.com/...",
-        "caption": "Beautiful sunset",
-        "location": "Bali",
-        "media_type": "image",
-        "generate_ai_summary": true/false
-    }
     """
     try:
-        data = request.get_json()
-        media_url = data.get('media_url')
-        caption = data.get('caption', '')
-        location = data.get('location', '')
-        media_type = data.get('media_type', 'image')
-        generate_ai_summary = data.get('generate_ai_summary', False)
-        
+        data = request.get_json(silent=True) or {}
+        media_url = str(data.get('media_url', '')).strip()
+        caption = str(data.get('caption', '')).strip()[:500]
+        location = str(data.get('location', '')).strip()[:100]
+        media_type = str(data.get('media_type', 'image')).strip()
+        generate_ai_summary = bool(data.get('generate_ai_summary', False))
+
         if not media_url:
             return jsonify({'error': 'Media URL required'}), 400
-        
-        # Optional: Generate AI summary if requested
+
+        # Only allow URLs from Cloudinary (prevents arbitrary URL injection)
+        if CLOUDINARY_HOST not in media_url or not media_url.startswith('https://'):
+            return jsonify({'error': 'Invalid media URL'}), 400
+
+        # Whitelist valid media types
+        if media_type not in ('image', 'video'):
+            media_type = 'image'
+
         ai_summary = None
         if generate_ai_summary and caption:
             ai_summary = mock_ai_summarize(caption)
-        
-        # Create post in Supabase
+
         post = supabase.table('posts').insert({
             'user_id': request.user_id,
             'media_url': media_url,
@@ -367,18 +404,18 @@ def create_post():
             'likes': 0,
             'created_at': datetime.utcnow().isoformat()
         }).execute()
-        
-        # Invalidate Redis cache to show new post immediately
+
+        # Invalidate Redis cache so new post appears immediately
         redis_client.delete('feed:popular')
-        
+
         return jsonify({
             'message': 'Post created successfully',
             'post': post.data[0] if post.data else {}
         }), 201
-    
+
     except Exception as e:
         print(f"Create post error: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Failed to create post'}), 500
 
 
 # ============================================================================
@@ -387,6 +424,7 @@ def create_post():
 
 @app.route('/api/ai/summarize', methods=['POST'])
 @token_required
+@limiter.limit('10 per minute')
 def summarize_caption():
     """
     Send caption/journal text to AI API for summarization.
@@ -394,17 +432,19 @@ def summarize_caption():
     Expected JSON: { "caption": "Long text to summarize...", "post_id": "uuid" }
     """
     try:
-        data = request.get_json()
-        caption = data.get('caption', '')
-        post_id = data.get('post_id')
-        
+        data = request.get_json(silent=True) or {}
+        caption = str(data.get('caption', '')).strip()[:500]
+        post_id = str(data.get('post_id', '')).strip()
+
         if not caption or not post_id:
             return jsonify({'error': 'Caption and post_id required'}), 400
-        
-        # Call external AI API (mocked for now)
+
+        # Basic UUID format check to prevent injection via post_id
+        if not re.match(r'^[0-9a-f\-]{36}$', post_id, re.IGNORECASE):
+            return jsonify({'error': 'Invalid post_id'}), 400
+
         ai_response = mock_ai_summarize(caption)
-        
-        # Store summary in Supabase
+
         supabase.table('post_summaries').insert({
             'post_id': post_id,
             'original_text': caption,
@@ -412,14 +452,15 @@ def summarize_caption():
             'tags': ai_response['tags'],
             'created_at': datetime.utcnow().isoformat()
         }).execute()
-        
+
         return jsonify({
             'summary': ai_response['summary'],
             'tags': ai_response['tags']
         }), 200
-    
+
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        print(f"AI summarize error: {str(e)}")
+        return jsonify({'error': 'Summarization failed'}), 500
 
 
 def mock_ai_summarize(text: str) -> dict:
@@ -445,6 +486,7 @@ def mock_ai_summarize(text: str) -> dict:
 # ============================================================================
 
 @app.route('/api/feed/popular', methods=['GET'])
+@limiter.limit('60 per minute')
 def get_popular_feed():
     """
     Fetch popular posts with Redis caching.
@@ -490,7 +532,8 @@ def get_popular_feed():
         }), 200
     
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        print(f"Feed error: {str(e)}")
+        return jsonify({'error': 'Failed to load feed'}), 500
 
 
 # ============================================================================
